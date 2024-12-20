@@ -1,0 +1,213 @@
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+  NO_PROXY: "gitlab.cha.rbxd.ds"
+  DOCKER_HOST: tcp://127.0.0.1:2375
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_DRIVER: overlay2
+  npm_config_cache: '$CI_PROJECT_DIR/.npm'
+  CYPRESS_CACHE_FOLDER: '$CI_PROJECT_DIR/cache/*'
+  ENV : 'staging'
+  NOTIFY: 'false'
+  BROWSER: 'chromium'
+  CLASSNAME: 
+    value: "comp-pricing"
+    options:
+      - "e2e"
+      - "comp-topics"
+      - "comp-pricing"
+      - "comp-content"
+      - "comp-all"
+      - "visual"
+      - "visual-pricing"
+      - "visual-content"
+      - "all"
+    description: "what are we testing"
+
+      
+.docker_curl_runner_image: &docker_curl_runner_image
+  image:
+    name: ${DOCKER_REGISTRY_CHA}/alpine/curl-jq:3.14
+  tags:
+    - k8s-cha-v2
+
+stages:
+  - test
+  - notify
+  - validate
+
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - .cache/*
+    - node_modules
+
+Run automation test suite:
+  image: artifacts.cha.rbxd.ds/mcr.microsoft.com/playwright:v1.49.0-noble
+  stage: test
+  tags:
+    - k8s-cha-v2
+  script:
+    - echo "Installing jq on Playwright image..."
+    - apt-get update && apt-get install -y jq ca-certificates # Install CA certificates
+    - cp ./certificates/* /usr/local/share/ca-certificates/ # Copy your certificates
+    - update-ca-certificates # Update CA store
+    - chmod +x ./scripts/push-to-elastic.sh
+    - echo "Running Automation Tests On :$ENV & using Browser :$BROWSER & using Classname :$CLASSNAME "
+    - export NODE_TLS_REJECT_UNAUTHORIZED=0
+    - yarn install --network-timeout 1000000000
+    - yarn add -D @playwright/test
+    - yarn add -D cross-env
+    - yarn add -D playwright@latest
+    - yarn add typescript ts-node @types/node --dev
+    - |
+      if [ "$CLASSNAME" = "comp-topics" ]; then
+        yarn test:comp-topics
+        echo "pass" > check.env
+      elif [ "$CLASSNAME" = "comp-pricing" ]; then
+        yarn test:comp-pricing
+        echo "pass" > check.env
+      elif [ "$CLASSNAME" = "comp-content" ]; then
+        yarn test:comp-content
+        echo "pass" > check.env
+      elif [ "$CLASSNAME" = "e2e" ]; then
+        yarn test:e2e
+        echo "pass" > check.env
+      elif [ "$CLASSNAME" = "visual" ]; then
+        yarn test:visual
+        echo "pass" > check.env
+      elif [ "$CLASSNAME" = "visual-pricing" ]; then
+        yarn test:visual-pricing
+        echo "pass" > check.env
+      elif [ "$CLASSNAME" = "visual-content" ]; then
+        yarn test:visual-content
+        echo "pass" > check.env
+      elif [ "$CLASSNAME" = "comp-all" ]; then
+        yarn test:comp-all
+        echo "pass" > check.env
+      elif [ "$CLASSNAME" = "all" ]; then
+        yarn test:all
+        echo "pass" > check.env
+      else
+        echo "Please select valid CLASSNAME either comp-topics, comp-pricing,e2e,visual or all"
+        exit 1
+      fi
+    - echo "Run automation test suite completed" > ./automation_test_completed
+  timeout: 50 minutes #overriding the default gitlab runner timeout optional
+  environment:
+    name: $ENV
+  after_script:
+    - yarn ts-node ./utilities/modify_Resultfile.ts # Run the post-processing script here
+    - ./scripts/push-to-elastic.sh # Push to Elasticsearch after modification
+    - echo "JOB_STATUS=${CI_JOB_STATUS:-success}" >> test_results.env
+    - echo "The status of the pipeline is:" $CI_PIPELINE_STATUS
+    - echo "The status of the pipeline is:" $CI_JOB_STATUS
+    - echo "JOB_ID=$CI_JOB_ID" >> test_results.env
+    - echo "SUITE_GITLAB_URL=$CI_JOB_URL" >> artifact.env
+    - |
+      if grep -q "pass" check.env; then
+        echo "The Automation Test cases got passed!";
+      else
+        echo "The Automation Test cases got failed!";
+      fi
+  artifacts:
+    when: always
+    paths:
+      - ./playwright-report/
+      - ./test-results
+      - ./automation_test_completed
+      - ./output.json
+    expire_in: 15 days
+    reports:
+      dotenv: test_results.env
+  allow_failure: true
+
+Notify on teams channel:
+  <<: *docker_curl_runner_image
+  needs: ["Run automation test suite"]
+  stage: notify
+  tags:
+    - k8s-cha-v2
+  script:
+    - |
+      if [[ "$JOB_STATUS" == "success" ]]; then
+        themeColor="52eb34"  # Green color for success
+      else
+        themeColor="eb3434"  # Red color for failure
+      fi
+      curl -X POST -H "Content-Type: application/json" -d '{
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "themeColor": "'"$themeColor"'",
+        "summary": "Workflow Automation ",
+        "sections": [{
+          "activityTitle": "Workflow - Automation Results",
+          "activitySubtitle": "Workflow Component Tests",
+          "activityImage": "https://www.icis.com/explore/wp-content/themes/icis-2020/assets/images/footer-logo.png",
+          "facts": [{
+            "name": "Project",
+            "value": "'"$CI_PROJECT_NAME"'"
+          }, {
+            "name": "Branch",
+            "value": "'"$CI_COMMIT_BRANCH"'"
+          }, {
+            "name": "Environment",
+            "value": "'"$ENV"'"
+          },{
+            "name": "Browser",
+            "value": "'"$BROWSER"'"
+          },
+          {
+            "name": "CLASSNAME",
+            "value": "'"$CLASSNAME"'"
+          },
+          {
+            "name": "Status",
+            "value": "'"$JOB_STATUS"'"
+          },{
+            "name": "Author",
+            "value": "'"$GITLAB_USER_NAME"'"
+          }],
+          "markdown": true
+        }],
+        "potentialAction": [{
+          "@type": "OpenUri",
+          "name": "Play Component Test Video Recording",
+          "targets": [{
+            "os": "default",
+            "uri": "https://gitlab.cha.rbxd.ds/icis/workflow/automation-test-suite/workflow-component-tests/-/jobs/'"$JOB_ID"'/artifacts/browse/test-results"
+          }]
+        },{
+          "@type": "OpenUri",
+          "name": "Browse Component Test Screenshots",
+          "targets": [{
+            "os": "default",
+            "uri": "https://gitlab.cha.rbxd.ds/icis/workflow/automation-test-suite/workflow-component-tests/-/jobs/'"$JOB_ID"'/artifacts/browse/test-results"
+          }]
+        },{
+          "@type": "OpenUri",
+          "name": "Download Full Test Reports",
+          "targets": [{
+            "os": "default",
+            "uri": "https://gitlab.cha.rbxd.ds/icis/workflow/automation-test-suite/workflow-component-tests/-/jobs/'"$JOB_ID"'/artifacts/raw/playwright-report/index.html"
+          }]
+        }]
+      }' $TEAMS_WEBHOOK_URL
+  dependencies:
+    - Run automation test suite
+  rules:
+    - if: '$NOTIFY == "true"'
+
+Verify jobs: 
+  stage: validate 
+  tags:
+    - k8s-cha-v2
+  script: 
+    - |
+      if [[ -f ./automation_test_completed ]]; then
+      echo "Automation suite job was successfully completed."
+      else
+      echo "Automation suite job was not completed."
+      exit 1
+      fi
+  dependencies:
+    - Run automation test suite

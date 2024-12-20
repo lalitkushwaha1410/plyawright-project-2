@@ -1,0 +1,39 @@
+{
+  "name": "workflow-automation-tests",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "https://gitlab.cha.rbxd.ds/icis/workflow/automation-test-suite/workflow-automation-tests.git",
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "allure-playwright": "^3.0.7",
+    "cross-env": "^7.0.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  },
+  "scripts": {
+    "debug": "npx playwright test --headed --debug",
+    "update-playwright-version": "yarn install && yarn playwright install",
+    "test:tc": "yarn cross-env BROWSER=chromium ENV_NAME=staging npx playwright test -g visual_tests_pricing.spec.ts --browser=chromium --headed",
+    "generateAllure": "allure generate allure-results -o allure-report --clean",
+    "systest": "cross-env ENV_NAME=systest npx playwright test --headed",
+    "staging": "cross-env ENV_NAME=staging npx playwright test --headed",
+    "parallel-run": "cross-env npx playwright test --headed --workers 3",
+    "allure:open": "allure open allure-report",
+    "test:report": "yarn test:tc && generateAllure",
+    "allure:clean": "allure clean allure-report",
+    "test:comp-topics": "yarn playwright test -g component_topics.spec.ts --list && yarn cross-env BROWSER=$BROWSER ENV_NAME=$ENV playwright test -g component_topics.spec.ts --browser=$BROWSER",
+    "test:e2e": "yarn playwright test -g E2E_workflow.spec.ts --list && yarn cross-env BROWSER=$BROWSER ENV_NAME=$ENV playwright test -g E2E_workflow.spec.ts --browser=$BROWSER",
+    "test:comp-all": "yarn test:comp-topics; yarn test:comp-pricing; yarn test:comp-content",
+    "test:visual": "yarn playwright test -g visual_tests.spec.ts --list && yarn cross-env BROWSER=$BROWSER ENV_NAME=$ENV playwright test -g visual_tests.spec.ts --browser=$BROWSER",
+    "test:visual-pricing": "yarn playwright test -g visual_tests_pricing.spec.ts --list && yarn cross-env BROWSER=$BROWSER ENV_NAME=$ENV playwright test -g visual_tests_pricing.spec.ts --browser=$BROWSER",
+    "test:visual-content": "yarn playwright test -g visual_tests_content.spec.ts --list && yarn cross-env BROWSER=$BROWSER ENV_NAME=$ENV playwright test -g visual_tests_content.spec.ts --browser=$BROWSER",
+    "test:comp-pricing": "yarn playwright test -g component_pricing.spec.ts --list && yarn cross-env BROWSER=$BROWSER ENV_NAME=$ENV playwright test -g component_pricing.spec.ts --browser=$BROWSER",
+    "test:comp-content": "yarn playwright test -g component_content.spec.ts --list && yarn cross-env BROWSER=$BROWSER ENV_NAME=$ENV playwright test -g component_content.spec.ts --browser=$BROWSER",
+    "test:all": "yarn playwright test --list && yarn cross-env BROWSER=$BROWSER ENV_NAME=$ENV playwright test --browser=$BROWSER"
+  },
+  "dependencies": {
+    "@types/node": "^22.10.1"
+  }
+}
